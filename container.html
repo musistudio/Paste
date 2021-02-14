@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
+    <title>Paste</title>
+    <script src="./js/libs/dayjs.min.js"></script>
+    <script src="./js/libs/relativeTime.js"></script>
+    <script src="./js/libs/zh-cn.js"></script>
+    <script src="./js/libs/zangodb.min.js"></script>
+    <script>
+        dayjs.locale('zh-cn')
+        dayjs.extend(window.dayjs_plugin_relativeTime)
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: rgba(255, 255, 255, .1);
+            width: 100vw;
+            height: 100vh;
+            border-radius: 8px;
+            overflow-y: hidden;
+            overflow-x: scroll;
+        }
+
+        .container {
+            white-space: nowrap;
+        }
+
+        .card {
+            width: 300px;
+            height: 270px;
+            margin: 50px;
+            display: inline-block;
+            border: 4px solid transparent;
+        }
+
+        .card .title {
+            color: #fff;
+            height: 60px;
+            background: #00A5F1;
+            padding-left: 10px;
+            padding-top: 10px;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+
+        .card .title .type {
+            font-size: 24px;
+            letter-spacing: 4px;
+            font-weight: bold;
+        }
+
+        .card .title .time {
+            font-size: 12px;
+        }
+
+        .card .content {
+            font-size: 14px;
+            padding: 0 6px;
+            height: 200px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid #00A5F1;
+            border-top: 0;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+
+        .card .content .line {
+            height: 19px;
+            width: 100%;
+            border-bottom: 1px solid #e1e1e1;
+        }
+
+        .card .content .text {
+            width: calc(100% - 12px);
+            position: absolute;
+            top: 0;
+            word-break: break-all;
+        }
+
+        .card.active {
+            border: 4px solid blue;
+            border-radius: 12px;
+        }
+
+        .card:hover {
+            border: 4px solid blue;
+            border-radius: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container"></div>
+
+    <script>
+        const { clipboard } = require('electron');
+        let datas = [];
+        let activeIndex = 0;
+        let db = new zango.Db('pastes', { histories: true });
+        let histories = db.collection('histories');
+    </script>
+    <script>
+        const types = {
+            link: '链接',
+            text: '文本'
+        }
+        async function getClipboardContent() {
+            resetActiveIndex();
+            content = clipboard.readText();
+            const res = await histories.find({
+                content
+            }).toArray();
+            if (res.length) {
+                return
+            }
+            console.log(res)
+            let type;
+            if (/^http(s):\/\//.test(content)) {
+                type = 'link'
+            } else {
+                type = 'text'
+            }
+            datas.unshift({
+                type, content, time: +new Date()
+            })
+            boards.unshift(new Board(datas[0], 'unshift'))
+            boards.forEach((board, index) => board.active = index === activeIndex)
+            histories.insert(datas[0]).then(() => {
+                console.log('数据写入成功')
+            }).catch(error => console.error(error));
+        }
+
+        function writeToClipboard(content) {
+            clipboard.writeText(content)
+        }
+
+
+        function resetActiveIndex() {
+            active = 0;
+        }
+
+        class Board {
+            _active = false;
+            constructor(options, type = 'push') {
+                this.options = options;
+                this.ele = this.createElement(options);
+                this.ele.addEventListener('click', () => { // 点击复制
+                    writeToClipboard(this.ele.querySelector('.text').innerText)
+                })
+                if (type === 'push') {
+                    document.querySelector('.container').appendChild(this.ele)
+                } else if (type === 'unshift') {
+                    const child = document.querySelector('.container').querySelector('.card')
+                    console.log(child)
+                    if (child) {
+                        document.querySelector('.container').insertBefore(this.ele, child)
+                    } else {
+                        document.querySelector('.container').appendChild(this.ele);
+                    }
+                }
+            }
+            get active() {
+                return this._active;
+            }
+            set active(value) {
+                if (value) {
+                    this.ele.className += ' active'
+                } else {
+                    this.ele.className = this.ele.className.replace(' active', '')
+                }
+                this._active = value;
+            }
+            updateTime() {
+                this.ele.querySelector('.time').innerText = dayjs().to(dayjs(this.options.time))
+            }
+            createElement({ type, content, time } = {}) {
+                const div = document.createElement('div');
+                div.innerHTML = `<div class="card">
+                    <div class="title">
+                        <div class="type">${types[type]}</div>
+                        <div class="time">${dayjs().to(dayjs(time))}</div>
+                    </div>
+                    <div class="content">
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="line"></div>
+                        <div class="text">${content}</div>
+                    </div>
+                </div>`;
+                return div.querySelector('.card');
+            }
+        }
+        let boards = [];
+        const timer = setInterval(() => {
+            boards.forEach(board => board.updateTime())
+        }, 1000);
+        
+        void async function () {
+            datas = await histories.find().toArray();
+            boards = datas.map(data => new Board(data));
+            boards[activeIndex] && (boards[activeIndex].active = true);
+        }();
+
+        // 监听键盘按下事件
+        window.addEventListener('keydown', e => {
+            const { code } = e;
+            if(code === 'ArrowLeft') {
+                activeIndex = (activeIndex - 1 + datas.length) % datas.length;
+                boards.forEach((board, index) => board.active = index === activeIndex)
+            }else if(code === 'ArrowRight') {
+                activeIndex = (activeIndex + 1) % datas.length;
+                boards.forEach((board, index) => board.active = index === activeIndex)
+            }else if(code === 'Enter') { // 回车键复制内容
+                writeToClipboard(datas[activeIndex].content)
+            }
+        })
+    </script>
+</body>
+
+</html>
